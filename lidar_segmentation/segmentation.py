@@ -19,7 +19,7 @@ import scipy
 
 import time
 
-
+from lidar_segmentation.util.ithaca365_utils import project_pointcloud_to_image
 NO_LABEL=-1
 
 class LidarSegmentationResult(object):
@@ -318,7 +318,7 @@ class LidarSegmentation(object):
     Class for performing segmentation of lidar point clouds.
     """
 
-    def __init__(self, projection, num_iters=-1, num_neighbors=10,
+    def __init__(self, data_type='kitti', projection=None, num_iters=-1, num_neighbors=10,
                  distance_scale=1.0,
                  outlier_removal=True,
                  pixel_to_lidar_kernel_size=5,
@@ -333,7 +333,14 @@ class LidarSegmentation(object):
         num_neighbors
         mask_shrink
         """
-        self.projection = projection
+        self.data_type=data_type
+        
+        if self.data_type == 'kitti':
+            self.projection = projection
+        if self.data_type == 'ithaca365':
+            from ithaca365.ithaca365 import Ithaca365
+            self.dataset = Ithaca365(version="v1.1", dataroot="/share/campbell/Skynet/nuScene_format/data", verbose=True)
+            
         self.num_iters = num_iters
         self.num_neighbors = num_neighbors
         self.distance_scale = distance_scale
@@ -341,8 +348,14 @@ class LidarSegmentation(object):
         self.pixel_to_lidar_kernel_size = pixel_to_lidar_kernel_size
         self.pixel_to_lidar_weight = pixel_to_lidar_weight
 
-    def project_points(self, lidar):
-        return self.projection.project(lidar)
+    def project_points(self, lidar, sample=None):
+        if self.data_type== 'kitti':
+            return self.projection.project(lidar)
+        if self.data_type == "ithaca365":
+            pointsensor_token = sample_record['data'][pointsensor_channel]
+            camera_token = sample_record['data'][camera_channel]
+            pass
+        raise NotImplementedError('Dataset has not been implemented.')
 
     def get_in_view(self, lidar, projected, img_rows, img_cols):
         in_frame_x = np.logical_and(projected[:, 0] > 0,
@@ -509,14 +522,16 @@ class LidarSegmentation(object):
         with cp.cuda.Device(device):
             start_time = time.time()
             # Project lidar into 2D
+            
             projected = self.project_points(lidar)
+            print(f'projected shape: {lidar.shape}')
             n_rows = detections.masks.shape[0]
             n_cols = detections.masks.shape[1]
             n_pixels = n_rows * n_cols
             in_view = self.get_in_view(lidar, projected, n_rows, n_cols)
             lidar = lidar[in_view, :]
             n_points = lidar.shape[0]
-
+            print(f'projected shape: {lidar.shape}')
             # Create initial label matrix by reshaping masks into vectors
             n_instances = len(detections)
             # Note that background is an extra instance
@@ -535,7 +550,7 @@ class LidarSegmentation(object):
 
             # Move labels to device
             Y_gpu = cp.array(labels)
-
+            print(lidar.shape)
             # Create graph on GPU
             # This is a (n_lidar_points + n_pixels) by (n_lidar_points + n_pixels) matrix
             G_gpu = self.create_graph(lidar, projected[in_view, :],

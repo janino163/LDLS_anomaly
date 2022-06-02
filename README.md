@@ -17,21 +17,22 @@ Depends on
 * [CuPy](https://cupy.chainer.org/) for sparse matrix multiplication on the GPU
 * [Numba](https://numba.pydata.org/numba-doc/dev/user/installing.html) for speeding up graph construction using the GPU.
 
-Installing dependencies using conda is recommended, in particular this makes it easier to install Numba with CUDA GPU support. Use the included `environment.yml` file:
+Installing dependencies using conda is recommended:
 
-``conda env create -f environment.yml``
+``conda create -n ldls_anomaly python=3.8``
+``conda install pytorch torchvision torchaudio cudatoolkit=11.3 -c pytorch``
+
+Install Ithaca365-devkit
+``git clone git@github.com:cxy1997/ithaca365-devkit.git``
+``cd ithaca365-devkit``
+``python setup.py develop``
+
 
 The [Point Processing Toolkit](https://github.com/heremaps/pptk) can also be useful for visualizing KITTI lidar point clouds:
 
 ``pip install pptk``
 
 ## Usage
-
-See the `demo.ipynb` Jupyter notebook for an example of how to use LDLS.
-
-If you used conda to install dependencies, activate your ldls conda environment, then run the following command to create an iPython kernel which you can use with the Jupyter notebook:
-
-``ipython kernel install --user --name=LDLS``
 
 
 ## Results

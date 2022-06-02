@@ -1,9 +1,10 @@
-
 import numpy as np
 from skimage.morphology import binary_erosion, binary_dilation
-from mrcnn import visualize
+# from mrcnn import visualize
 from colorsys import hsv_to_rgb
-
+import torch
+import torchvision
+from torchvision.transforms import transforms as transforms
 import matplotlib.pyplot as plt
 
 CLASS_NAMES = ['BG', 'person', 'bicycle', 'car', 'motorcycle', 'airplane',
@@ -104,31 +105,31 @@ class MaskRCNNDetections(Detections):
                      masks=self.masks, class_ids=self.class_ids,
                      scores=self.scores)
 
-    def visualize(self, image):
-        # Make dictionary of class colors
-        hues = np.random.rand(len(CLASS_NAMES))
-        s = 0.6
-        v = 0.8
+#     def visualize(self, image):
+#         # Make dictionary of class colors
+#         hues = np.random.rand(len(CLASS_NAMES))
+#         s = 0.6
+#         v = 0.8
 
-        # Separate out hues that actually appear in the image
-        classes_in_image = list(set(self.class_ids))
-        class_hues = np.linspace(0, 1.0, num=len(classes_in_image) + 1)[:-1]
-        # Randomize hues but keep them separated and between 0 and 1.0
-        class_hues = np.mod(class_hues + np.random.rand(), 1.0)
-        np.random.shuffle(class_hues)
-        for i, c in enumerate(classes_in_image):
-            hues[c] = class_hues[i]
+#         # Separate out hues that actually appear in the image
+#         classes_in_image = list(set(self.class_ids))
+#         class_hues = np.linspace(0, 1.0, num=len(classes_in_image) + 1)[:-1]
+#         # Randomize hues but keep them separated and between 0 and 1.0
+#         class_hues = np.mod(class_hues + np.random.rand(), 1.0)
+#         np.random.shuffle(class_hues)
+#         for i, c in enumerate(classes_in_image):
+#             hues[c] = class_hues[i]
 
-        class_colors = np.array([hsv_to_rgb(h, s, v) for h in hues]) * 255
-        class_colors[0, :] = [175, 175, 175]  # set background color to grey
+#         class_colors = np.array([hsv_to_rgb(h, s, v) for h in hues]) * 255
+#         class_colors[0, :] = [175, 175, 175]  # set background color to grey
 
-        # Visualize results
+#         # Visualize results
 
 
-        visualize.display_instances(image, self.rois, self.masks, self.class_ids,
-                                    CLASS_NAMES, self.scores,
-                                    colors=[class_colors[i, :] / 255. for i in
-                                            self.class_ids])
+#         visualize.display_instances(image, self.rois, self.masks, self.class_ids,
+#                                     CLASS_NAMES, self.scores,
+#                                     colors=[class_colors[i, :] / 255. for i in
+#                                             self.class_ids])
 
     def get_background(self):
         bg_mask = np.logical_not(np.logical_or.reduce(self.masks, axis=2))
