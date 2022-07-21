@@ -1,0 +1,10 @@
+work_dir: ${hydra:runtime.cwd}
+save_dir: ${hydra:run.dir}
+
+defaults:
+  - data_paths: default.yaml
+  - _self_
+
+dataset: lyft
+resave: False
+sample_path: /home/jan268/repo/LDLS_anomaly/data_preprocessing/lyft/meta_data/lyft_2019_train_sample_tokens.txt
