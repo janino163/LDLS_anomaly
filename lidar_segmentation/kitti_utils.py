@@ -126,10 +126,8 @@ def load_kitti_lidar_data(filename, verbose=False, load_reflectance=False):
     with open(filename, "rb") as lidar_file:
         # Velodyne data stored as binary float matrix
         lidar_data = np.fromfile(lidar_file, dtype=np.float32)
-        print(f'lidar shape before: {lidar_data.shape}')
         # Velodyne data contains x,y,z, and reflectance
         lidar_data = lidar_data.reshape((-1,4))
-        print(lidar_data.shape)
     if verbose:
         print("Loaded lidar point cloud with %d points." % lidar_data.shape[0])
     if load_reflectance:

@@ -7,6 +7,7 @@ Lidar segmentation module.
 """
 
 import numpy as np
+import os.path as osp
 from sklearn.neighbors import KDTree
 from scipy.sparse import coo_matrix
 from sklearn.preprocessing import normalize
@@ -14,12 +15,16 @@ from numba import cuda
 import math
 import numba
 import cupy as cp
-
+from nuscenes.utils.geometry_utils import view_points
+from nuscenes.utils.data_classes import LidarPointCloud
 import scipy
-
+from pyquaternion import Quaternion
 import time
-
+from PIL import Image
 from lidar_segmentation.util.ithaca365_utils import project_pointcloud_to_image
+import logging;
+logger = logging.getLogger("numba");
+logger.setLevel(logging.ERROR)
 NO_LABEL=-1
 
 class LidarSegmentationResult(object):
@@ -29,7 +34,7 @@ class LidarSegmentationResult(object):
     """
 
     def __init__(self, points, projected, label_likelihoods,
-                 class_ids, in_camera_view, initial_labels):
+                 class_ids, in_camera_view, initial_labels, sample=None):
         self.points = points # all lidar points: xyz
         self.projected = projected
         self.label_likelihoods = label_likelihoods # n_iterations by n_points by n_instances
@@ -37,7 +42,9 @@ class LidarSegmentationResult(object):
         # self.confidence = confidence  # confidence at point level
         self.in_camera_view = in_camera_view # indices of lidar points that are in view of camera
         self.initial_labels = initial_labels
-
+        self.sample = sample
+#         if sample:
+#             self.global_points = self.get_global_points()
     # def visualize(self, use_as_color="class", colors=None):
     #     TODO colors should be a list/dictionary
         # if use_as_color == "class":
@@ -47,7 +54,26 @@ class LidarSegmentationResult(object):
         # else:
         #     raise ValueError("Invalid use_as_color input %s provided. Should be 'class' or 'mask'."
         #                      % use_as_color)
+    def get_global_points(self, nusc):
+        lidar = np.swapaxes(self.points,0,1)
+        pc = LidarPointCloud(lidar)
+        
+        
+        pointsensor_token = self.sample['data']['LIDAR_TOP']
+        pointsensor = nusc.get('sample_data', pointsensor_token)
+        
+        # First step: transform the pointcloud to the ego vehicle frame for the timestamp of the sweep.
+        cs_record = nusc.get('calibrated_sensor', pointsensor['calibrated_sensor_token'])
+        pc.rotate(Quaternion(cs_record['rotation']).rotation_matrix)
+        pc.translate(np.array(cs_record['translation']))
 
+        # Second step: transform from ego to the global frame.
+        poserecord = nusc.get('ego_pose', pointsensor['ego_pose_token'])
+        pc.rotate(Quaternion(poserecord['rotation']).rotation_matrix)
+        pc.translate(np.array(poserecord['translation']))
+        
+        lidar = np.swapaxes(pc.points,0,1)
+        return lidar
     @classmethod
     def load_file(cls, filename):
         """
@@ -71,7 +97,7 @@ class LidarSegmentationResult(object):
                        label_likelihoods=npzfile["label_likelihoods"],
                        class_ids=npzfile["class_ids"],
                        in_camera_view=npzfile["in_camera_view"],
-                       initial_labels=npzfile["initial_labels"])
+                       initial_labels=npzfile["initial_labels"], sample=npzfile["sample"])
         return results
 
     def to_file(self, filename):
@@ -92,7 +118,7 @@ class LidarSegmentationResult(object):
                                 label_likelihoods=self.label_likelihoods,
                                 class_ids=self.class_ids,
                                 in_camera_view=self.in_camera_view,
-                                initial_labels=self.initial_labels)
+                                initial_labels=self.initial_labels, sample=self.sample)
 
     def point_confidence(self, iter=-1):
         """
@@ -129,8 +155,10 @@ class LidarSegmentationResult(object):
     def class_labels(self, iter=-1):
         # Instance 0 is background (class 0)
         instance_labels = self.instance_labels(iter=iter) - 1
+        
         if len(self.class_ids) == 0:  # No objects, return all zeros
             return np.zeros(instance_labels.shape, dtype=int)
+        
         labels = self.class_ids[instance_labels]
         labels[instance_labels == -1] = 0
         return labels
@@ -333,14 +361,9 @@ class LidarSegmentation(object):
         num_neighbors
         mask_shrink
         """
-        self.data_type=data_type
+        self.data_type = data_type
         
-        if self.data_type == 'kitti':
-            self.projection = projection
-        if self.data_type == 'ithaca365':
-            from ithaca365.ithaca365 import Ithaca365
-            self.dataset = Ithaca365(version="v1.1", dataroot="/share/campbell/Skynet/nuScene_format/data", verbose=True)
-            
+        self.projection = projection
         self.num_iters = num_iters
         self.num_neighbors = num_neighbors
         self.distance_scale = distance_scale
@@ -348,14 +371,11 @@ class LidarSegmentation(object):
         self.pixel_to_lidar_kernel_size = pixel_to_lidar_kernel_size
         self.pixel_to_lidar_weight = pixel_to_lidar_weight
 
-    def project_points(self, lidar, sample=None):
-        if self.data_type== 'kitti':
-            return self.projection.project(lidar)
-        if self.data_type == "ithaca365":
-            pointsensor_token = sample_record['data'][pointsensor_channel]
-            camera_token = sample_record['data'][camera_channel]
-            pass
-        raise NotImplementedError('Dataset has not been implemented.')
+    def project_points(self, lidar):
+        return self.projection.project(lidar)
+    
+#     def project_points_nusc(self, sample, sensor, nusc)
+#         pass
 
     def get_in_view(self, lidar, projected, img_rows, img_cols):
         in_frame_x = np.logical_and(projected[:, 0] > 0,
@@ -517,21 +537,87 @@ class LidarSegmentation(object):
             final_lh[outlier_indices,
             1:] = 0  # set outlier points to background
         return final_lh
+    
+    def run_nusc(self, detections, sample, nusc, camera_channel, max_iters=200, device=0, save_all=False):
+        min_dist = 1.0
+        pointsensor_token = sample['data']['LIDAR_TOP']
+        camera_token = sample['data'][camera_channel]
+        
+        cam = nusc.get('sample_data', camera_token)
+        pointsensor = nusc.get('sample_data', pointsensor_token)
+        
+        try:
+            root = nusc.dataroot
+        except AttributeError:
+            root = nusc.data_path
+                
+        pcl_path = osp.join(root, pointsensor['filename'])
+        pc = LidarPointCloud.from_file(pcl_path)
+        lidar = pc.points
+        im = Image.open(osp.join(root, cam['filename']))
+        
+        # First step: transform the pointcloud to the ego vehicle frame for the timestamp of the sweep.
+        cs_record = nusc.get('calibrated_sensor', pointsensor['calibrated_sensor_token'])
+        pc.rotate(Quaternion(cs_record['rotation']).rotation_matrix)
+        pc.translate(np.array(cs_record['translation']))
 
-    def run(self, lidar, detections, max_iters=200, device=0, save_all=True):
+        # Second step: transform from ego to the global frame.
+        poserecord = nusc.get('ego_pose', pointsensor['ego_pose_token'])
+        pc.rotate(Quaternion(poserecord['rotation']).rotation_matrix)
+        pc.translate(np.array(poserecord['translation']))
+
+        # Third step: transform from global into the ego vehicle frame for the timestamp of the image.
+        poserecord = nusc.get('ego_pose', cam['ego_pose_token'])
+        pc.translate(-np.array(poserecord['translation']))
+        pc.rotate(Quaternion(poserecord['rotation']).rotation_matrix.T)
+
+        # Fourth step: transform from ego into the camera.
+        cs_record = nusc.get('calibrated_sensor', cam['calibrated_sensor_token'])
+        pc.translate(-np.array(cs_record['translation']))
+        pc.rotate(Quaternion(cs_record['rotation']).rotation_matrix.T)
+
+        # Fifth step: actually take a "picture" of the point cloud.
+        # Grab the depths (camera frame z axis points away from the camera).
+        depths = pc.points[2, :]
+        
+        points = view_points(pc.points[:3, :], np.array(cs_record['camera_intrinsic']), normalize=True)
+        
+        # Remove points that are either outside or behind the camera. Leave a margin of 1 pixel for aesthetic reasons.
+        # Also make sure points are at least 1m in front of the camera to avoid seeing the lidar points on the camera
+        # casing for non-keyframes which are slightly out of sync.
+        mask = np.ones(depths.shape[0], dtype=bool)
+        mask = np.logical_and(mask, depths > min_dist)
+        mask = np.logical_and(mask, points[0, :] > 1)
+        mask = np.logical_and(mask, points[0, :] < im.size[0] - 1)
+        mask = np.logical_and(mask, points[1, :] > 1)
+        mask = np.logical_and(mask, points[1, :] < im.size[1] - 1)
+#         points = points[:, mask]
+        points = np.swapaxes(points,0,1)
+        lidar = np.swapaxes(lidar,0,1)
+        
+        return self.run(lidar, detections, projected=points, in_view=mask, max_iters=max_iters, device=device, save_all=save_all, sample=sample)
+        
+    def run(self, lidar, detections, max_iters=200, device=0, save_all=False, projected=None, in_view=None, sample=None):
         with cp.cuda.Device(device):
             start_time = time.time()
             # Project lidar into 2D
             
-            projected = self.project_points(lidar)
-            print(f'projected shape: {lidar.shape}')
-            n_rows = detections.masks.shape[0]
-            n_cols = detections.masks.shape[1]
+            if self.data_type == 'kitti':
+                projected = self.project_points(lidar)
+                n_rows = detections.masks.shape[0]
+                n_cols = detections.masks.shape[1]
+                in_view = self.get_in_view(lidar, projected, n_rows, n_cols)
+                
+            elif self.data_type == 'nusc':
+                assert projected is not None
+                assert in_view is not None
+                n_rows = detections.masks.shape[0]
+                n_cols = detections.masks.shape[1]
+            
             n_pixels = n_rows * n_cols
-            in_view = self.get_in_view(lidar, projected, n_rows, n_cols)
             lidar = lidar[in_view, :]
             n_points = lidar.shape[0]
-            print(f'projected shape: {lidar.shape}')
+
             # Create initial label matrix by reshaping masks into vectors
             n_instances = len(detections)
             # Note that background is an extra instance
@@ -550,7 +636,7 @@ class LidarSegmentation(object):
 
             # Move labels to device
             Y_gpu = cp.array(labels)
-            print(lidar.shape)
+            
             # Create graph on GPU
             # This is a (n_lidar_points + n_pixels) by (n_lidar_points + n_pixels) matrix
             G_gpu = self.create_graph(lidar, projected[in_view, :],
@@ -596,4 +682,4 @@ class LidarSegmentation(object):
                                        in_camera_view=in_view,
                                        label_likelihoods=all_label_likelihoods,
                                        class_ids=detections.class_ids,
-                                       initial_labels=initial_lidar_labels)
+                                       initial_labels=initial_lidar_labels, sample=sample)

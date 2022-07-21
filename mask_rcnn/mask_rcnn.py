@@ -8,12 +8,15 @@ Uses the Mask-RCNN detector from https://github.com/matterport/Mask_RCNN
 """
 
 import os
+import os.path as osp
 import sys
 
 from lidar_segmentation.detections import MaskRCNNDetections
 import torch
 import torchvision
 from torchvision.transforms import transforms as transforms
+import numpy as np
+from skimage.io import imread
 
 # Root directory of the project
 ROOT_DIR = os.path.abspath(".")
@@ -86,6 +89,10 @@ class MaskRCNNDetector(object):
         all_detections = []
         for image in images:
             mask, roi, id_, score = self.get_prediction(image)
+            roi = np.array(roi).reshape((-1,4))
+            id_ = np.array(id_)
+            score = np.array(score)
+            
             all_detections.extend([MaskRCNNDetections(shape=image.shape,
                                              rois=roi,
                                              masks=mask,
@@ -96,15 +103,42 @@ class MaskRCNNDetector(object):
         else:
             return all_detections
 
-
-    def get_prediction(self, image):
+    def detect_nusc(self, samples, nusc, sensor, verbose=0):
+        images = []
+        multiple_samples = type(samples) == list
+        if not multiple_samples:
+            samples = [samples]
+        for sample in samples:
+            cam = nusc.get('sample_data', sample['data'][sensor])
+            
+            try:
+                root = nusc.dataroot
+            except AttributeError:
+                root = nusc.data_path
+            images.append(imread(osp.join(root, cam['filename'])))
+            
+        return self.detect(images, verbose)
+        
+    def get_prediction(self, image, min_score=0.7):
         image = self.transform(image)
         image = torch.unsqueeze(image, dim=0)
         image = image.to(self.device)
         pred = self.model(image)
-        
-        pred_score = list(pred[0]['scores'].detach().cpu().numpy())
+
+        pred_score = list(pred[0]['scores'].detach().cpu().numpy())    
         masks = (pred[0]['masks']>0.5).squeeze().detach().cpu().numpy()
-        pred_class = [COCO_INSTANCE_CATEGORY_NAMES[i] for i in list(pred[0]['labels'].detach().cpu().numpy())]
-        pred_boxes = [[(i[0], i[1]), (i[2], i[3])] for i in list(pred[0]['boxes'].detach().cpu().numpy())]
+
+        if masks.ndim < 3:
+            masks = masks[np.newaxis, :, :]
+
+        masks = np.swapaxes(masks,0,2)
+        masks = np.swapaxes(masks,0,1)
+        
+        
+        class_list = list(pred[0]['labels'].detach().cpu().numpy())
+        box_list = list(pred[0]['boxes'].detach().cpu().numpy())
+        
+        pred_class = [i for i in class_list]
+        pred_boxes = [[i[1], i[0], i[3], i[2]] for i in box_list]
+        
         return masks, pred_boxes, pred_class, pred_score

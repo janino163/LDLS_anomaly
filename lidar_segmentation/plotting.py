@@ -1,4 +1,6 @@
-import plotly.plotly as ply
+# import plotly.plotly as ply
+import plotly as ply
+
 from plotly.offline import iplot
 import plotly.graph_objs as go
 import numpy as np
@@ -7,7 +9,70 @@ from lidar_segmentation.segmentation import LidarSegmentationResult
 from colorsys import hsv_to_rgb
 
 from lidar_segmentation.detections import CLASS_NAMES
-
+ptc_layout_config={
+    'title': {
+        'text': 'test vis LiDAR',
+        'font': {
+            'size': 20,
+            'color': 'rgb(150,150,150)',
+        },
+        'xanchor': 'left',
+        'yanchor': 'top'},
+    'paper_bgcolor': 'rgb(0,0,0)',
+    'width' : 900,
+    'height' : 600,
+    'margin' : {
+        'l': 20,
+        'r': 20,
+        'b': 20,
+        't': 20
+    },
+    'legend': {
+        'font':{
+            'size':20,
+            'color': 'rgb(150,150,150)',
+        },
+        'itemsizing': 'constant'
+    },
+    "hoverlabel": {
+        "namelength": -1,
+    },
+    'showlegend': False,
+    'scene': {
+          'aspectmode': 'manual',
+          'aspectratio': {'x': 1, 'y': 1, 'z': 1},
+          'camera': {'eye': {'x': 0, 'y': 0, 'z': 0.5}},
+          'xaxis': {'color': 'rgb(150,150,150)',
+                    'dtick': 10,
+                    'gridcolor': 'rgb(100,100,100)',
+                    'range': [-150, 150],
+                    'showbackground': False,
+                    'showgrid': True,
+                    'showline': False,
+                    'showticklabels': True,
+                    'tickmode': 'linear',
+                    'tickprefix': 'x:'},
+          'yaxis': {'color': 'rgb(150,150,150)',
+                    'dtick': 10,
+                    'gridcolor': 'rgb(100,100,100)',
+                    'range': [-150, 150],
+                    'showbackground': False,
+                    'showgrid': True,
+                    'showline': False,
+                    'showticklabels': True,
+                    'tickmode': 'linear',
+                    'tickprefix': 'y:'},
+          'zaxis': {'color': 'rgb(150,150,150)',
+                    'dtick': 10,
+                    'gridcolor': 'rgb(100,100,100)',
+                    'range': [-150, 150],
+                    'showbackground': False,
+                    'showgrid': True,
+                    'showline': False,
+                    'showticklabels': True,
+                    'tickmode': 'linear',
+                    'tickprefix': 'z:'}},
+}
 
 def label_colors(labels, bg_label=0, s=0.9, v=0.8):
     """
@@ -117,16 +182,16 @@ def plot_diffusion(results, iters=None, filename='', hovertext=False):
     xy_lim = 20
     zmin = -7
     zmax = zmin + 2*xy_lim
-    layout = go.Layout(margin=dict(l=0,r=0,b=0,t=0),
-                       paper_bgcolor='rgb(55,55,55)',
-                       scene=dict(aspectmode='cube',
-                                  camera=dict(center=dict(x=0,y=0,z=0),
-                                              eye=dict(x=-1.5,y=0.0,z=0.1)),
-                                  xaxis=dict(title='x', range=[0, 2*xy_lim]),
-                                  yaxis=dict(title='y', range=[-xy_lim,xy_lim]),
-                                  zaxis=dict(title='z', range=[zmin,zmax])),
-                       sliders=sliders, )
-
+#     layout = go.Layout(margin=dict(l=0,r=0,b=0,t=0),
+#                        paper_bgcolor='rgb(55,55,55)',
+#                        scene=dict(aspectmode='cube',
+#                                   camera=dict(center=dict(x=0,y=0,z=0),
+#                                               eye=dict(x=-1.5,y=0.0,z=0.1)),
+#                                   xaxis=dict(title='x', range=[0, 2*xy_lim]),
+#                                   yaxis=dict(title='y', range=[-xy_lim,xy_lim]),
+#                                   zaxis=dict(title='z', range=[zmin,zmax])),
+#                        sliders=sliders, )
+    layout = ptc_layout_config
     fig = dict(data=data, layout=layout)
 
     if not filename:
@@ -135,7 +200,7 @@ def plot_diffusion(results, iters=None, filename='', hovertext=False):
         ply.plot(fig, filename=filename, auto_open=False)
 
 
-def plot_segmentation_result(results=None, label_type='class', size=1.2, labels=None, points=None):
+def plot_segmentation_result(results=None, label_type='class', size=1.2, labels=None, points=None, name=None):
     """
 
     Parameters
@@ -171,10 +236,10 @@ def plot_segmentation_result(results=None, label_type='class', size=1.2, labels=
     colors = [plot_color_dict[label] for label in labels]
 
     plot_points(points, size=1.2, opacity=1.0,
-                color=colors, colorscale=colorscale)
+                color=colors, colorscale=colorscale, name=name)
 
-
-def plot_points(points, size=1.0, opacity=0.8, color=None, colorscale=None,):
+    
+def plot_points(points, size=1.0, opacity=0.8, color=None, colorscale=None, name=None):
     data = [pointcloud(points, size, opacity, color, colorscale)]
     x = points[:,0]
     y = points[:,1]
@@ -183,15 +248,16 @@ def plot_points(points, size=1.0, opacity=0.8, color=None, colorscale=None,):
     xy_lim = 20
     zmin = -7
     zmax = zmin + 2*xy_lim
-    layout = go.Layout(margin=dict(l=0,r=0,b=0,t=0),
-                       paper_bgcolor='rgb(55,55,55)',
-                       scene=dict(aspectmode='cube',
-                                xaxis=dict(title='x', range=[0, 2*xy_lim]),
-                                yaxis=dict(title='y', range=[-xy_lim,xy_lim]),
-                                zaxis=dict(title='z', range=[zmin,zmax])))
+#     layout = go.Layout(margin=dict(l=0,r=0,b=0,t=0),
+#                        paper_bgcolor='rgb(55,55,55)',
+#                        scene=dict(aspectmode='cube',
+#                                 xaxis=dict(title='x', range=[0, 2*xy_lim]),
+#                                 yaxis=dict(title='y', range=[-xy_lim,xy_lim]),
+#                                 zaxis=dict(title='z', range=[zmin,zmax])))
+    layout = ptc_layout_config
     fig = go.Figure(data=data,layout=layout)
-
-    iplot(fig)
+    if name:
+        fig.write_html(name)
 
 
 def pointcloud(points, size=1.0, opacity=0.8, color=None, colorscale='Rainbow'):
