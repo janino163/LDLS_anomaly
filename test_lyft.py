@@ -15,10 +15,11 @@ from tqdm import tqdm
 import hydra
 from omegaconf import DictConfig, OmegaConf
 from lyft_dataset_sdk.lyftdataset import LyftDataset
-import logging;
-logging.disable(logging.WARNING)
-import warnings
-warnings.filterwarnings('ignore')
+# import logging;
+# logging.disable(logging.WARNING)
+# import warnings
+# warnings.filterwarnings('ignore')
+
 def eprint(*args, **kwargs):
     print(*args, file=sys.stderr, **kwargs)
     
@@ -29,62 +30,71 @@ def display_args(args):
     eprint("=======================================")
 
 def save_masks(args, name, mask_ped, mask_car):
-    if args.resave:
-        np.savez(osp.join(args.data_paths.ldls_mask_path, f"{name}"), pedestrian=mask_ped, car=mask_car)
-    else:
-        if not osp.exists(osp.join(args.data_paths.ldls_mask_path, f"{name}")):
-            np.savez(osp.join(args.data_paths.ldls_mask_path, f"{name}"), pedestrian=mask_ped, car=mask_car)
+#     if args.resave:
+    np.savez(osp.join(args.data_paths.ldls_full_mask_path, f"{name}"), pedestrian=mask_ped, car=mask_car)
+#     else:
+#         if not osp.exists(osp.join(args.data_paths.ldls_mask_path, f"{name}")):
+#             np.savez(osp.join(args.data_paths.ldls_mask_path, f"{name}"), pedestrian=mask_ped, car=mask_car)
             
             
-@hydra.main(config_path="configs/", config_name="test_lyft.yaml")
+@hydra.main(version_base='1.1', config_path="configs/", config_name="test_lyft.yaml")
 def main(args: DictConfig):
     display_args(args)
     visualize = False
     nusc = LyftDataset(data_path='/home/yy785/datasets/lyft_original/v1.01-train/', json_path='/home/yy785/datasets/lyft_original/v1.01-train/v1.01-train/', verbose=False)
     #Pick sensor
-    camera_channel = 'CAM_FRONT'
+#     camera_channel = 'CAM_FRONT'
+    camera_channels = ['CAM_BACK_RIGHT','CAM_FRONT_RIGHT','CAM_FRONT_LEFT','CAM_BACK_LEFT','CAM_FRONT','CAM_BACK']
     #run image detector
     detector = MaskRCNNDetector()
-    with open(args.sample_path, "r") as f:
+#     sam_path = osp.join(args.data_paths.ldls_sample_path, "all_samples.txt")
+    sam_path = args.sample_path
+    scenes = nusc.scene
+
+    
+    with open(sam_path, "r") as f:
         sample_tokens = f.read().splitlines()
     
-    for sample_token in tqdm(sample_tokens[17300:]):
-#         print(f'scene number {scene_num} out of {len(nusc.scene)}')
-#         first_sample_token = my_scene['first_sample_token']
-        sample = nusc.get('sample', sample_token)
-#         step = 0
+    for sample_token in tqdm(sample_tokens):
         
-#         while sample['next'] != '':
+        
+        sample = nusc.get('sample', sample_token)
         base_name = sample['token']
-        detections = detector.detect_nusc(sample, nusc, camera_channel)
-        detection = detections[0]
+        mask_ped = None
+        mask_car = None
+        
+        if osp.exists(osp.join(args.data_paths.ldls_full_mask_path, f"{base_name}.npz")):
+            continue
+        
+        for camera_channel in camera_channels:
 
-        lidarseg = LidarSegmentation(data_type='nusc')
-        results = lidarseg.run_nusc(detection, sample, nusc, camera_channel, max_iters=20)
-#         if step % 10 == 0:
-        if visualize:
-            detection.visualize_nusc(sample, nusc, camera_channel)
-            plot_segmentation_result(results, label_type='class', name=f'{basename}.html')
+            detections = detector.detect_nusc(sample, nusc, camera_channel)
+            detection = detections[0]
 
-        global_lidar = results.get_global_points(nusc)
-        class_labels = results.class_labels()
+            lidarseg = LidarSegmentation(data_type='nusc')
+            results = lidarseg.run_nusc(detection, sample, nusc, camera_channel, max_iters=100)
 
-        mask_ped = np.ones(global_lidar.shape[0], dtype=bool)
-        mask_ped = np.logical_and(mask_ped, class_labels == 1)
+            if visualize:
+                detection.visualize_nusc(sample, nusc, camera_channel)
+                plot_segmentation_result(results, label_type='class', name=f'{base_name}.html')
 
+            class_labels = results.class_labels()
 
+            if type(mask_ped) is np.ndarray:
+                mask_ped[results.in_camera_view] = np.logical_or(mask_ped[results.in_camera_view], class_labels == 1)
+            else:
+                mask_ped = np.zeros(results.in_camera_view.shape[0], dtype=bool)
+                mask_ped[results.in_camera_view] = np.logical_or(mask_ped[results.in_camera_view], class_labels == 1)
 
-        mask_car = np.ones(global_lidar.shape[0], dtype=bool)
-        mask_car = np.logical_and(mask_car, class_labels == 3)
+            if type(mask_car) is np.ndarray:
+                mask_car[results.in_camera_view] = np.logical_or(mask_car[results.in_camera_view], class_labels == 3)
+            else:
+                mask_car = np.zeros(results.in_camera_view.shape[0], dtype=bool)
+                mask_car[results.in_camera_view] = np.logical_or(mask_car[results.in_camera_view], class_labels == 3)
+
 
         filename = f'{base_name}'
         save_masks(args, filename, mask_ped=mask_ped, mask_car=mask_car)
-
-
-
-#         sample = nusc.get('sample', sample['next'])
-#         step = step + 1
-
 
 if __name__=="__main__":
     main()

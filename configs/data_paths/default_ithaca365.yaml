@@ -1,0 +1,12 @@
+ldls_mask_path: /share/campbell/lyft/ldls_masks_ithaca365
+ldls_full_mask_path: /share/campbell/lyft/ldls_full_masks_ithaca365
+ldls_box_path: /share/campbell/lyft/ldls_boxes_ithaca365
+ldls_full_box_path: /share/campbell/lyft/ldls_full_boxes_ithaca365
+# ldls_track_path: /share/campbell/lyft/track_lists_ithaca365
+# ldls_sample_path: /share/campbell/lyft/info_ithaca365
+matched_scenes_path: /share/campbell/lyft/info_ithaca365
+ithaca365_boxes: /home/jan268/temp/ithaca365_boxes
+ithaca365_masks: /home/jan268/temp/ithaca365_masks
+ithaca365_trajectories: /home/jan268/temp/ithaca365_trajectories
+ldls_track_path: /home/jan268/temp/ithaca365_tracks
+ldls_sample_path: /home/jan268/temp/ithaca365_samples

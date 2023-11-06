@@ -7,6 +7,8 @@ Lidar segmentation module.
 """
 
 import numpy as np
+from shapely.geometry import Point, Polygon
+import shapely
 import os.path as osp
 from sklearn.neighbors import KDTree
 from scipy.sparse import coo_matrix
@@ -15,14 +17,15 @@ from numba import cuda
 import math
 import numba
 import cupy as cp
-from nuscenes.utils.geometry_utils import view_points
-from nuscenes.utils.data_classes import LidarPointCloud
+from ithaca365.utils.geometry_utils import view_points
+from ithaca365.utils.data_classes import LidarPointCloud
 import scipy
 from pyquaternion import Quaternion
 import time
 from PIL import Image
 from lidar_segmentation.util.ithaca365_utils import project_pointcloud_to_image
-import logging;
+import logging
+from ithaca365.utils.data_io import load_velo_scan
 logger = logging.getLogger("numba");
 logger.setLevel(logging.ERROR)
 NO_LABEL=-1
@@ -238,7 +241,7 @@ def get_pixel_indices(x, y, indices_matrix, kernel_size):
 
 
 @cuda.jit
-def connect_lidar_to_pixels(lidar, projected, pixel_indices_matrix, kernel_size,
+def connect_lidar_to_pixels(n_points, projected, pixel_indices_matrix, kernel_size,
                             weight, out_rows, out_cols, out_weight):
     """
     Compute connections from lidar points to image pixels on the GPU.
@@ -289,7 +292,7 @@ def connect_lidar_to_pixels(lidar, projected, pixel_indices_matrix, kernel_size,
     """
     start = cuda.grid(1)
     stride = cuda.gridsize(1)
-    n_points = lidar.shape[0]
+#     n_points = lidar.shape[0]
 
     for i in range(start, n_points, stride):
         x = projected[i,0]
@@ -437,6 +440,8 @@ class LidarSegmentation(object):
         # CUDA config
         blocks = 30
         threads = 256
+#         blocks = 136
+#         threads = 256
 
         # outputs for point-to-pixel connections
         pp_rows_out = cp.full((n_points, self.pixel_to_lidar_kernel_size ** 2),
@@ -446,7 +451,7 @@ class LidarSegmentation(object):
         pp_d_out = cp.full((n_points, self.pixel_to_lidar_kernel_size ** 2),
                            -1, dtype=cp.float32)
 
-        connect_lidar_to_pixels[blocks, threads](lidar, projected,
+        connect_lidar_to_pixels[blocks, threads](n_points, projected,
                                                  pixel_indices_matrix,
                                                  self.pixel_to_lidar_kernel_size,
                                                  self.pixel_to_lidar_weight,
@@ -489,7 +494,6 @@ class LidarSegmentation(object):
 
         # Find nearest neighbors between lidar points
         kdt = KDTree(lidar)
-
         # do KDT query with k+1 to account for point being own nearest neighbor
         distances, neighbors = kdt.query(lidar, k=self.num_neighbors + 1)
 
@@ -537,9 +541,64 @@ class LidarSegmentation(object):
             final_lh[outlier_indices,
             1:] = 0  # set outlier points to background
         return final_lh
+    def run_ithaca365(self, detections, lidar_data_token, nusc, camera_data_token, max_iters=200, device=0, save_all=False):
+        min_dist = 1.0
+        cam = nusc.get('sample_data', camera_data_token)
+        pointsensor = nusc.get('sample_data', lidar_data_token)
+        try:
+            root = nusc.dataroot
+        except AttributeError:
+            root = nusc.data_path
+        pcl_path = osp.join(root, pointsensor['filename'])
+        pc = LidarPointCloud.from_file(pcl_path)
+#         pc_arry = load_velo_scan(nusc.get_sample_data_path(lidar_data_token))
+#         pc = LidarPointCloud(pc_arry.T)
+        lidar = pc.points
+        im = Image.open(osp.join(root, cam['filename']))
+#         print(lidar.shape)
+        
+        # First step: transform the pointcloud to the ego vehicle frame for the timestamp of the sweep.
+        cs_record = nusc.get('calibrated_sensor', pointsensor['calibrated_sensor_token'])
+        pc.rotate(Quaternion(cs_record['rotation']).rotation_matrix)
+        pc.translate(np.array(cs_record['translation']))
+
+        # Second step: transform from ego to the global frame.
+        poserecord = nusc.get('ego_pose', pointsensor['ego_pose_token'])
+        pc.rotate(Quaternion(poserecord['rotation']).rotation_matrix)
+        pc.translate(np.array(poserecord['translation']))
+
+        # Third step: transform from global into the ego vehicle frame for the timestamp of the image.
+        poserecord = nusc.get('ego_pose', cam['ego_pose_token'])
+        pc.translate(-np.array(poserecord['translation']))
+        pc.rotate(Quaternion(poserecord['rotation']).rotation_matrix.T)
+
+        # Fourth step: transform from ego into the camera.
+        cs_record = nusc.get('calibrated_sensor', cam['calibrated_sensor_token'])
+        pc.translate(-np.array(cs_record['translation']))
+        pc.rotate(Quaternion(cs_record['rotation']).rotation_matrix.T)
+
+        # Fifth step: actually take a "picture" of the point cloud.
+        # Grab the depths (camera frame z axis points away from the camera).
+        depths = pc.points[2, :]
+#         print(pc.points.shape)
+        points = view_points(pc.points[:3, :], np.array(cs_record['camera_intrinsic']), normalize=True)
+#         print(points.shape)
+        # Remove points that are either outside or behind the camera. Leave a margin of 1 pixel for aesthetic reasons.
+        # Also make sure points are at least 1m in front of the camera to avoid seeing the lidar points on the camera
+        # casing for non-keyframes which are slightly out of sync.
+        mask = np.ones(depths.shape[0], dtype=bool)
+        mask = np.logical_and(mask, depths > min_dist)
+        mask = np.logical_and(mask, points[0, :] > 1)
+        mask = np.logical_and(mask, points[0, :] < im.size[0] - 1)
+        mask = np.logical_and(mask, points[1, :] > 1)
+        mask = np.logical_and(mask, points[1, :] < im.size[1] - 1) 
+
+        points = np.swapaxes(points,0,1)
+        lidar = np.swapaxes(lidar,0,1)
+        return self.run(lidar, detections, projected=points, in_view=mask, max_iters=max_iters, device=device, save_all=save_all, sample=lidar_data_token)
     
     def run_nusc(self, detections, sample, nusc, camera_channel, max_iters=200, device=0, save_all=False):
-        min_dist = 1.0
+        min_dist = 2.0
         pointsensor_token = sample['data']['LIDAR_TOP']
         camera_token = sample['data'][camera_channel]
         
@@ -582,6 +641,7 @@ class LidarSegmentation(object):
         
         points = view_points(pc.points[:3, :], np.array(cs_record['camera_intrinsic']), normalize=True)
         
+        
         # Remove points that are either outside or behind the camera. Leave a margin of 1 pixel for aesthetic reasons.
         # Also make sure points are at least 1m in front of the camera to avoid seeing the lidar points on the camera
         # casing for non-keyframes which are slightly out of sync.
@@ -615,11 +675,14 @@ class LidarSegmentation(object):
                 n_cols = detections.masks.shape[1]
             
             n_pixels = n_rows * n_cols
+#             print(f'ori shape: {lidar.shape}')
             lidar = lidar[in_view, :]
+            
             n_points = lidar.shape[0]
-
+            
             # Create initial label matrix by reshaping masks into vectors
             n_instances = len(detections)
+            
             # Note that background is an extra instance
             if detections.masks.size > 0:  # handle case where no objects detected
                 pixel_labels = detections.masks.reshape((-1, n_instances))
@@ -628,27 +691,56 @@ class LidarSegmentation(object):
                      pixel_labels], axis=1)
             else:
                 pixel_labels = detections.get_background().reshape((n_pixels, 1))
-
+            
             # Append initial zero labels for lidar points
             labels = np.zeros((n_points + n_pixels, n_instances + 1))
             initial_lidar_labels = np.zeros((n_points, n_instances + 1))
             labels[n_points:, :] = pixel_labels
-
             # Move labels to device
             Y_gpu = cp.array(labels)
-            
-            # Create graph on GPU
-            # This is a (n_lidar_points + n_pixels) by (n_lidar_points + n_pixels) matrix
-            G_gpu = self.create_graph(lidar, projected[in_view, :],
-                                      n_rows=detections.masks.shape[0],
-                                      n_cols=detections.masks.shape[1])
-
+#             inst_labels = np.argmax(labels, axis=1)
+#             print(inst_labels.shape)
             if save_all:
                 all_label_likelihoods = np.empty(
                     (max_iters + 1, n_points, n_instances + 1))
             else:
                 all_label_likelihoods = np.empty(
                     (2, n_points, n_instances + 1))
+                
+            # Create graph on GPU
+            # This is a (n_lidar_points + n_pixels) by (n_lidar_points + n_pixels) matrix
+            # CHECK INITIAL LABELS
+            
+            if n_points < self.num_neighbors + 1:
+                
+                all_label_likelihoods[-1, :, :] = cp.asnumpy(
+                    Y_gpu[:n_points, :])
+                return LidarSegmentationResult(points=lidar, projected=projected,
+                                       in_camera_view=in_view,
+                                       label_likelihoods=all_label_likelihoods,
+                                       class_ids=detections.class_ids,
+                                       initial_labels=initial_lidar_labels, sample=sample)
+            else:
+                G_gpu = self.create_graph(lidar, projected[in_view, :],
+                                      n_rows=detections.masks.shape[0],
+                                      n_cols=detections.masks.shape[1])
+                
+#             Y_gpu = G_gpu.dot(Y_gpu)
+#             Y_gpu = G_gpu.dot(Y_gpu)
+            
+#             all_label_likelihoods[-1, :, :] = cp.asnumpy(Y_gpu[:n_points, :])
+#             return LidarSegmentationResult(points=lidar, projected=projected,
+#                                    in_camera_view=in_view,
+#                                    label_likelihoods=all_label_likelihoods,
+#                                    class_ids=detections.class_ids,
+#                                    initial_labels=initial_lidar_labels, sample=sample)
+
+#             if save_all:
+#                 all_label_likelihoods = np.empty(
+#                     (max_iters + 1, n_points, n_instances + 1))
+#             else:
+#                 all_label_likelihoods = np.empty(
+#                     (2, n_points, n_instances + 1))
 
             for i in range(max_iters):
                 Y_new = G_gpu.dot(Y_gpu)
@@ -676,7 +768,6 @@ class LidarSegmentation(object):
                 else:
                     all_label_likelihoods[-1, :, :] = self.remove_outliers(
                         all_label_likelihoods[-1, :, :], G_gpu)
-
 
         return LidarSegmentationResult(points=lidar, projected=projected,
                                        in_camera_view=in_view,

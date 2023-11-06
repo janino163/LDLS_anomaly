@@ -156,6 +156,15 @@ class MaskRCNNDetections(Detections):
         image = imread(osp.join(root, cam['filename']))
         self.visualize(image)
         
+    def visualize_ithaca365(self, sample, nusc):
+        cam = nusc.get('sample_data', sample)
+        try:
+            root = nusc.dataroot
+        except AttributeError:
+            root = nusc.data_path
+        image = imread(osp.join(root, cam['filename']))
+        self.visualize(image) 
+        
     def apply_mask(self, image, mask, color, alpha=0.5):
         """Apply the given mask to the image.
         """
@@ -193,13 +202,13 @@ class MaskRCNNDetections(Detections):
             assert boxes.shape[0] == masks.shape[-1] == class_ids.shape[0]
 
         # If no axis is passed, create one and automatically call show()
-        auto_save = False
+        auto_save = True
         if not ax:
             _, ax = plt.subplots(1, figsize=figsize)
             auto_save = True
 
         # Generate random colors
-        colors = colors or random_colors(N)
+        colors = colors
 
         # Show area outside image boundaries.
         height, width = image.shape[:2]
@@ -250,9 +259,10 @@ class MaskRCNNDetections(Detections):
                 verts = np.fliplr(verts) - 1
                 p = Polygon(verts, facecolor="none", edgecolor=color)
                 ax.add_patch(p)
+        
         ax.imshow(masked_image.astype(np.uint8))
         if auto_save:
-            plt.savefig('image_detections.png')
+            plt.savefig('/home/jan268/temp/image_detections.png')
         
         
     def get_background(self):

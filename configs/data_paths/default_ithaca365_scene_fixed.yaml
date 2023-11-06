@@ -1,0 +1,13 @@
+ldls_mask_path: /share/campbell/lyft/ldls_masks_ithaca365_youya
+ldls_full_mask_path: /share/campbell/lyft/ldls_full_masks_ithaca365_youya
+ldls_box_path: /share/campbell/lyft/ldls_boxes_ithaca365_youya
+ldls_full_box_path: /share/campbell/lyft/ldls_full_boxes_ithaca365_youya
+ithaca365_boxes: /home/jan268/temp/ithaca365_boxes_youya
+ithaca365_masks: /home/jan268/temp/ithaca365_masks_youya
+# ldls_track_path: /share/campbell/lyft/track_lists_ithaca365_youya
+# ldls_sample_path: /share/campbell/lyft/info_ithaca365_youya
+
+ldls_track_path: /home/jan268/youya/ithaca365_tracks_youya
+ldls_sample_path: /home/jan268/youya/ithaca365_samples_youya
+matched_scenes_path: /home/jan268/youya/info_ithaca365_youya
+ithaca365_trajectories: /home/jan268/youya/ithaca365_trajectories_youya

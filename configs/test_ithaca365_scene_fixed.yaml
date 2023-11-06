@@ -1,0 +1,17 @@
+work_dir: ${hydra:runtime.cwd}
+save_dir: ${hydra:run.dir}
+
+defaults:
+  - data_paths: default_ithaca365_scene_fixed.yaml
+  - _self_
+
+dataset: ithaca365
+resave: True
+
+covariance_id: 3
+use_angular_velocity: False
+match_distance: m
+match_threshold: 14.0671
+match_algorithm: greedy
+start_index: 0
+end_index: -1

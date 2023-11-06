@@ -6,5 +6,13 @@ defaults:
   - _self_
 
 dataset: lyft
-resave: False
-sample_path: /home/jan268/repo/LDLS_anomaly/data_preprocessing/lyft/meta_data/lyft_2019_train_sample_tokens.txt
+resave: True
+sample_path: /share/campbell/lyft/info/all_samples.txt
+lidar_sample_data_path: /share/campbell/lyft/info/all_lidar_sample_data_samples.txt
+# /home/jan268/repo/LDLS_anomaly/data_preprocessing/lyft/meta_data/lyft_2019_train_sample_tokens.txt
+
+covariance_id: 3
+use_angular_velocity: False
+match_distance: m
+match_threshold: 14.0671
+match_algorithm: greedy

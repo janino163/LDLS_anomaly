@@ -2,13 +2,13 @@ work_dir: ${hydra:runtime.cwd}
 save_dir: ${hydra:run.dir}
 
 defaults:
-  - data_paths: default.yaml
+  - data_paths: default_ithaca365.yaml
   - _self_
 
 dataset: lyft
 resave: True
-sample_path: /share/campbell/lyft/info/all_samples.txt
-lidar_sample_data_path: /share/campbell/lyft/info/all_lidar_sample_data_samples.txt
+sample_path: /share/campbell/lyft/info_ithaca365/all_samples.csv
+lidar_sample_data_path: /share/campbell/lyft/info/all_lidar_sample_data_samples_ithaca365.txt
 # /home/jan268/repo/LDLS_anomaly/data_preprocessing/lyft/meta_data/lyft_2019_train_sample_tokens.txt
 
 covariance_id: 3

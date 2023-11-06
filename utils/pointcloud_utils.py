@@ -1,5 +1,5 @@
 import types
-
+from scipy.spatial.transform import Rotation as R
 import numpy as np
 import sklearn
 import torch
@@ -7,6 +7,7 @@ from sklearn.linear_model import RANSACRegressor
 
 from utils.iou3d_nms import iou3d_nms_utils
 from utils import kitti_util
+import open3d as o3d
 
 def cart2hom(pts_3d):
     n = pts_3d.shape[0]
@@ -275,50 +276,67 @@ def variance_rectangle(cluster_ptc, delta=0.1):
     return rval, angle, area
 
 
-def get_lowest_point_rect(ptc, xz_center, l, w, ry):
-    ptc_xz = ptc[:, [0, 2]] - xz_center
+def get_lowest_point_rect(ptc, xy_center, l, w, ry):
+    x_axis = 0
+    y_axis = 1
+    z_axis = 2
+    ptc_xy = ptc[:, [0, 1]] - xy_center
     rot = np.array([
         [np.cos(ry), -np.sin(ry)],
         [np.sin(ry), np.cos(ry)]
     ])
-    ptc_xz = ptc_xz @ rot.T
-    mask = (ptc_xz[:, 0] > -l/2) & \
-        (ptc_xz[:, 0] < l/2) & \
-        (ptc_xz[:, 1] > -w/2) & \
-        (ptc_xz[:, 1] < w/2)
-    ys = ptc[mask, 1]
+    ptc_xy = ptc_xy @ rot.T
+    mask = (ptc_xy[:, 0] > -l/2) & \
+        (ptc_xy[:, 0] < l/2) & \
+        (ptc_xy[:, 1] > -w/2) & \
+        (ptc_xy[:, 1] < w/2)
+    ys = ptc[mask, 2]
     
     if ys.size == 0:
         print(set(mask))
         print(f'center: {xz_center}, l: {l}, w: {w}, ry: {ry}')
-        print(f'min: {ptc_xz.min()}, max: {ptc_xz.max()}')
+        print(f'min: {ptc_xy.min()}, max: {ptc_xy.max()}')
     return ys.max()
 
-def get_obj(ptc, full_ptc, fit_method='min_zx_area_fit'):
-    if fit_method == 'min_zx_area_fit':
-        corners, ry, area = minimum_bounding_rectangle(ptc[:, [0, 2]])
+def open3d_method(pts):
+    pcd = o3d.geometry.PointCloud()
+    pcd.points = o3d.utility.Vector3dVector(pts)
+    bbox = o3d.geometry.OrientedBoundingBox()
+    bbox = bbox.create_from_points(pcd.points)
+    center = bbox.get_center()
+    print(dir(bbox))
+    exit()
+    
+def get_obj(ptc, full_ptc, fit_method='PCA'):
+    x_axis = 0
+    y_axis = 1
+    z_axis = 2
+    if fit_method == 'min_yx_area_fit':
+        corners, ry, area = minimum_bounding_rectangle(ptc[:, [x_axis, y_axis]])
     elif fit_method == 'PCA':
-        corners, ry, area = PCA_rectangle(ptc[:, [0, 2]])
+        corners, ry, area = PCA_rectangle(ptc[:, [x_axis, y_axis]])
     elif fit_method == 'variance_to_edge':
-        corners, ry, area = variance_rectangle(ptc[:, [0, 2]])
+        corners, ry, area = variance_rectangle(ptc[:, [x_axis, y_axis]])
     elif fit_method == 'closeness_to_edge':
-        corners, ry, area = closeness_rectangle(ptc[:, [0, 2]])
+        corners, ry, area = closeness_rectangle(ptc[:, [x_axis, y_axis]])
+    elif fit_method == 'open3d':
+        open3d_method(ptc[:,0:3])
     else:
         raise NotImplementedError(fit_method)
-    ry *= -1
+#     ry *= -1
     l = np.linalg.norm(corners[0] - corners[1])
     w = np.linalg.norm(corners[0] - corners[-1])
     c = (corners[0] + corners[2]) / 2
-    # bottom = ptc[:, 1].max()
-    bottom = get_lowest_point_rect(full_ptc, c, l, w, ry)
-    h = bottom - ptc[:, 1].min()
+#     bottom = ptc[:, 2].max()
+#     bottom = get_lowest_point_rect(full_ptc, c, l, w, ry)
+    h = abs(ptc[:, 2].max() - ptc[:, 2].min())
     obj = types.SimpleNamespace()
-    obj.t = np.array([c[0], bottom, c[1]])
-    obj.l = l
-    obj.w = w
-    obj.h = h
+    obj.t = np.array([c[0], c[1], ptc[:, 2].min()])
+    obj.l = l if l > 4 else 4
+    obj.w = w if w > 1.7 else 1.7
+    obj.h = h if h > 1.5 else 1.5
     obj.ry = ry
-    obj.volume = area * h
+    obj.volume = l * w * h
     return obj
 
 

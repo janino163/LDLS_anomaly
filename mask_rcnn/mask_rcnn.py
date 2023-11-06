@@ -92,7 +92,14 @@ class MaskRCNNDetector(object):
             roi = np.array(roi).reshape((-1,4))
             id_ = np.array(id_)
             score = np.array(score)
+            score_thres = score >= .6
             
+            roi = roi[score_thres]
+            mask = mask[:,:,score_thres]
+            score = score[score_thres]
+            id_ = id_[score_thres]
+            
+            id_[id_ == 8] = 3 #treat truck as car
             all_detections.extend([MaskRCNNDetections(shape=image.shape,
                                              rois=roi,
                                              masks=mask,
@@ -118,7 +125,24 @@ class MaskRCNNDetector(object):
             images.append(imread(osp.join(root, cam['filename'])))
             
         return self.detect(images, verbose)
-        
+    
+    def detect_ithaca365(self, camera_sample_data, nusc, verbose=0):
+        images = []
+        multiple_samples = type(camera_sample_data) == list
+        if not multiple_samples:
+            samples = [camera_sample_data]
+        else:
+            samples = camera_sample_data
+        for sample in samples:
+            cam = nusc.get('sample_data', sample)
+            
+            try:
+                root = nusc.dataroot
+            except AttributeError:
+                root = nusc.data_path
+            images.append(imread(osp.join(root, cam['filename'])))
+        return self.detect(images, verbose)
+            
     def get_prediction(self, image, min_score=0.7):
         image = self.transform(image)
         image = torch.unsqueeze(image, dim=0)
