@@ -50,6 +50,6 @@ this is where intermediate data products are stored to make reruns faster
 
 ## run script
 
-The entry script can be run with the following command.
+From the ldls_anomaly folder the entry script can be run with the following command.
 
 ``python corrected_box_gen_ithaca365.py``
