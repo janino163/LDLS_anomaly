@@ -88,7 +88,7 @@ def get_other_traversals(sample_data_token, nusc, num_history=5,
     # TODO: CHANGE
     token_list = query_by_lidar(sample_data, nusc)
     # remove self
-#     token_list.remove(sample_data['token'])
+    token_list.remove(sample_data['token'])
 #     if time_valid:
 #         token_list = [tkn for tkn in token_list
 #                       if nusc.get("sample_data", tkn)['timestamp'] < sample_data['timestamp']]
@@ -479,7 +479,7 @@ def plot_pedestrian_lidar(lidar):
                     'tickprefix': 'z:'}},
 }
     data = []
-    print(lidar[2,:].min(), lidar[2,:].max())
+    
     data.append(go.Scatter3d(
                 x=lidar[0,:],
                 y=lidar[1,:],
@@ -501,44 +501,33 @@ def main(args: DictConfig):
     detector = MaskRCNNDetector()
     sam_path = args.sample_path
         
-#     data = pd.read_csv(sam_path, header=None)
+    data = pd.read_csv(sam_path, header=None)
     
-#     sample_data_tokens = data.values.tolist()
-#     sample_data_tokens = sample_data_tokens[82500:]
-    eval_scenes = [
-    'd8cc0305881ddea482b9af3881f2e214']
-    sample_data_tokens = []
-    for scene_ in eval_scenes:
-        track_result_path = f'{scene_}.csv'
-        ns_scene = osp.join('/home/jan268/temp/ithaca365_tracks', track_result_path)
-        tracked_data = pd.read_csv(ns_scene, header=None)
-        sample_data_tokens.extend(tracked_data.values.tolist())
+    sample_data_tokens = data.values.tolist()
         
     for sample_data_token in tqdm(sample_data_tokens):
         lidar_sample_data_token = sample_data_token[0]
         pointsensor = nusc.get('sample_data', lidar_sample_data_token)
         base_name = pointsensor['filename'].split('/')[-1].split('.')[0]
         cam_sample_data_tokens = sample_data_token[1:]
-    #         base_name = lidar_sample_data_token
+
         car_seg_mask = None
         ped_seg_mask = None
         car_boxes = []
         ped_boxes = []
 
         if os.path.exists(osp.join(args.data_paths.ithaca365_masks, f"{base_name}.npz")):
-            masks_loaded = np.load(osp.join('/home/jan268/temp/ithaca365_masks', f"{base_name}.npz"))
+            masks_loaded = np.load(osp.join(args.data_paths.ithaca365_masks, f"{base_name}.npz"))
             H = masks_loaded['p2']
         else:
             H = get_point_persistency_score(lidar_sample_data_token, nusc, num_histories=5, ranges=(0, 70))
-            
-#         if not is_file_older_than_x_days(osp.join(args.data_paths.ithaca365_masks, f"{base_name}.npz"), days=2):
-#             continue
             
         object_mask = H < 0.5
         for camera_channel in cam_sample_data_tokens:
             detections = detector.detect_ithaca365(camera_channel, nusc)
             detection = detections[0]
-#             detection.visualize_ithaca365(camera_channel, nusc)
+            detection.visualize_ithaca365(camera_channel, nusc)
+
             lidar_cam, lidar, depths, im = project_to_image(lidar_sample_data_token, nusc, camera_channel)
             
             temp_car_seg_mask, temp_ped_seg_mask, ped_cluster, car_cluster = mask_points(detection, lidar_cam, lidar, depths, im, object_mask)
